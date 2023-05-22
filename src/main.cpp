@@ -1,6 +1,8 @@
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
+#include <PubSubClient.h>
 #include <SPIFFS.h>
 #include <DHT11.h>
 #include "driver/gpio.h"
@@ -32,12 +34,26 @@ const char* password_0 = "ibmf7777";
 const char* ssid_1 = "69-7";//淡水住處 AP
 const char* password_1 = "0982215945";
 
+//===========================//
+//        MQTT參數設定        //
+//===========================//
+const char* mqttServer = "0.tcp.jp.ngrok.io";
+const int mqttPort = 11872;
+const char* mqttClientID = "ESP32Client";
+const char* mqttUser = "thomas890913";
+const char* mqttPassword = "Tm1309su";
+
+//===========================//
+//       Instance Object     //
+//===========================//
 AsyncWebServer server(80);
+WiFiClient espClient;
+PubSubClient client(espClient);
 
 // AP 連線設定
 void APConnect(void) {
   WiFi.mode(WIFI_STA); // 模式為連線方
-  WiFi.begin(ssid_1, password_1); // 開始連線
+  WiFi.begin(ssid_0, password_0); // 開始連線
   while ( WiFi.status() != WL_CONNECTED ) {
     delay(500);
     Serial.print(".");
@@ -50,6 +66,24 @@ void APConnect(void) {
   Serial.print("\n訊號強度 : ");
   Serial.println(WiFi.RSSI());
 }
+
+// MQTT Server 連線設定
+void MQTTConnect(void) {
+  client.setServer(mqttServer, mqttPort);
+
+  while(!client.connected()) {
+    Serial.println("\nConnecting to MQTT ...");
+
+    if (client.connect(mqttClientID, mqttUser, mqttPassword)) {
+      Serial.println("connected");
+    } else {
+      Serial.print("failed with state : ");
+      Serial.print(client.state());
+      delay(2000);
+    }
+  }
+}
+
 // 網頁伺服器設置
 void WebServerRunnig(void) {
   // 靜態網頁
@@ -71,6 +105,11 @@ void DHT11_task(void *pvParam) {
   gpio_pad_select_gpio(DHT11_PIN);
 
   while(1) {
+    StaticJsonDocument<200> doc;
+    char outputJSON[sizeof(doc)];
+    doc["ModelName"] = "DHT11 Sensor";
+    doc["description"] = "detecting the value of the humi and temp in the air instantly.";
+
     DHT11 dht11(DHT11_PIN);
 
     uint8_t data[5] = {0};
@@ -82,9 +121,20 @@ void DHT11_task(void *pvParam) {
     uint8_t check        = data[4];
     if (check = temp + temp_decimal + humi + humi_decimal) {
       printf("Temp=%d, Humi=%d\r\n", temp, humi);
+      doc["percentOfTemp"] = temp;
+      doc["percentOfHumi"] = humi;
+      doc["message"] = "OK";
       //------- 以JSON資料供於網頁使用 -------//
     } else {
       printf("DHT11 Error!\r\n");
+      doc["message"] = "DHT11 Error!";
+    }
+
+    serializeJson(doc, outputJSON);
+    if (client.publish("esp32/dht11", outputJSON) == true) {
+      Serial.println("publishing success");
+    } else {
+      Serial.println("publishing failed");
     }
 
     vTaskSuspend(NULL);//將任務自身暫停，不恢復將不運行
@@ -96,13 +146,29 @@ void DurtHumiDetect_task(void *pvParam) {
   pinMode(DURTHUMIDETECTOR_ANALOG_PIN, INPUT);
 
   while(1) {
+    StaticJsonDocument<200> doc;
+    char outputJSON[sizeof(doc)];
+    doc["ModelName"] = "Dust Humi Sensor";
+    doc["description"] = "Detecting the value of the humi in the dust instantly.";
+
     uint16_t DurtHumi_data = analogRead(DURTHUMIDETECTOR_ANALOG_PIN);
-    printf("Humi=%f%%\r\n", ((4096.0 - (float)DurtHumi_data)/4096.0)*100.0);
+    float DustHumi_percent = ((4096.0 - (float)DurtHumi_data)/4096.0)*100.0;
+    printf("Humi=%f%%\r\n", DustHumi_percent);
+    doc["PercentOfHumi"] = DustHumi_percent;
 
     if (!digitalRead(DURTHUMIDETECTOR_DIGITAL_PIN)) {
       printf("請保持適度的澆水，目前土壤非常的濕潤~~~\r\n");
+      doc["message"] = "請保持適度的澆水，目前土壤非常的濕潤~~~";
     } else {
       printf("你的植物需要澆水了!!!\r\n");
+      doc["message"] = "你的植物需要澆水了!!!";
+    }
+
+    serializeJson(doc, outputJSON);
+    if (client.publish("esp32/dustHumi", outputJSON) == true) {
+      Serial.println("publishing success");
+    } else {
+      Serial.println("publishing failed");
     }
 
     vTaskDelay( 3000 / portTICK_PERIOD_MS );
@@ -124,6 +190,8 @@ void setup() {
   APConnect();
   // Web伺服器開啟
   WebServerRunnig();
+  // MQTT客戶端連線
+  MQTTConnect();
 
   //--------配置定時器-------//
   esp_timer_create_args_t start_dht = {
@@ -147,7 +215,7 @@ void setup() {
 }
 
 void loop() {
-  ;
+  client.loop();
 }
 
 //定時器回調函數
