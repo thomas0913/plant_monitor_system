@@ -121,8 +121,8 @@ void DHT11_task(void *pvParam) {
     }
     sendRequest("esp32_dht11", message, message_log);
 
-    //vTaskSuspend(NULL);//將任務自身暫停，不恢復將不運行
     vTaskDelay( 4000 / portTICK_PERIOD_MS );
+    //vTaskSuspend(NULL);//將任務自身暫停，不恢復將不運行
   }
 }
 
@@ -136,7 +136,7 @@ void DustHumiDetect_task(void *pvParam) {
     String message_log;
     uint16_t DustHumi_data = analogRead(DUSTHUMIDETECTOR_ANALOG_PIN);
     float DustHumi_percent = ((4096.0 - (float)DustHumi_data)/4096.0)*100.0;
-    
+
     printf("Humi=%f%%\r\n", DustHumi_percent);
     message = "DustHumi_percent: ";
     message += String(DustHumi_percent);
@@ -151,6 +151,7 @@ void DustHumiDetect_task(void *pvParam) {
     sendRequest("esp32_DustHumiDetect", message, message_log);
 
     vTaskDelay( 3000 / portTICK_PERIOD_MS );
+    //vTaskSuspend(NULL);
   }
 }
 
